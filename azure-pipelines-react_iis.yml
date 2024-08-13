@@ -1,0 +1,62 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: "windows-latest"
+
+variables:
+  siteName: "MyReactApp" # The name of your IIS site/folder
+  sitePath: 'C:\\inetpub\\wwwroot\\MyReactApp' # The physical path of the site
+
+steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "18.x"
+    displayName: "Install Node.js"
+
+  - script: |
+      npm install
+      npm run build
+    displayName: "Build React app"
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: "build" # React build output directory, includes web.config
+      ArtifactName: "react-build"
+    displayName: "Publish Build Artifacts"
+
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: "current"
+      downloadType: "single"
+      artifactName: "react-build"
+      downloadPath: "$(System.ArtifactsDirectory)"
+    displayName: "Download Build Artifacts"
+
+  - script: |
+      siteName="$(siteName)"
+      sitePath="$(sitePath)"
+
+      # Check if the site exists in IIS
+      if (!Get-Website -Name $siteName) {
+          Write-Host "Creating IIS site $siteName..."
+          New-Website -Name $siteName -PhysicalPath $sitePath -Port 80 -Force
+      } else {
+          Write-Host "IIS site $siteName already exists."
+      }
+
+      # Ensure the directory exists and replace its contents
+      if (Test-Path $sitePath) {
+          Write-Host "Replacing contents of $sitePath..."
+          Remove-Item "$sitePath\*" -Recurse -Force
+      } else {
+          Write-Host "Creating directory $sitePath..."
+          New-Item -Path $sitePath -ItemType Directory
+      }
+
+      # Copy files to the IIS site folder
+      Copy-Item "$(System.ArtifactsDirectory)\react-build\*" $sitePath -Recurse
+    displayName: "Deploy React app to IIS"
+    pwsh: true # Use PowerShell Core
